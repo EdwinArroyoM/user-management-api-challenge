@@ -1,0 +1,123 @@
+name: User Management API Tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  env-tests:
+    name: E2E (${{ matrix.environment }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        environment: [dev, prod]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Start API container
+        run: |
+          docker run -d --name user-api -p 3000:3000 ghcr.io/danielsilva-loanpro/sdet-interview-challenge:latest
+
+      - name: Wait for API to be ready
+        run: |
+          for i in {1..30}; do
+            if curl -fsS http://localhost:3000/dev/users > /dev/null; then
+              echo "API is ready"
+              exit 0
+            fi
+            echo "Waiting for API..."
+            sleep 2
+          done
+          echo "API did not become ready in time"
+          docker logs user-api
+          exit 1
+
+      - name: Run environment-specific tests
+        run: |
+          mkdir -p reports
+          python -m pytest tests \
+            --env ${{ matrix.environment }} \
+            -m "not cross_env" \
+            --html=reports/${{ matrix.environment }}-report.html \
+            --self-contained-html
+
+      - name: Upload environment report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: report-${{ matrix.environment }}
+          path: reports/${{ matrix.environment }}-report.html
+
+      - name: Print container logs on failure
+        if: failure()
+        run: docker logs user-api
+
+  cross-env-tests:
+    name: Cross-env tests
+    runs-on: ubuntu-latest
+    continue-on-error: true
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Start API container
+        run: |
+          docker run -d --name user-api -p 3000:3000 ghcr.io/danielsilva-loanpro/sdet-interview-challenge:latest
+
+      - name: Wait for API to be ready
+        run: |
+          for i in {1..30}; do
+            if curl -fsS http://localhost:3000/dev/users > /dev/null; then
+              echo "API is ready"
+              exit 0
+            fi
+            echo "Waiting for API..."
+            sleep 2
+          done
+          echo "API did not become ready in time"
+          docker logs user-api
+          exit 1
+
+      - name: Run cross-environment tests
+        run: |
+          mkdir -p reports
+          python -m pytest tests \
+            -m "cross_env" \
+            --html=reports/cross-env-report.html \
+            --self-contained-html
+
+      - name: Upload cross-env report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: report-cross-env
+          path: reports/cross-env-report.html
+
+      - name: Print container logs on failure
+        if: failure()
+        run: docker logs user-api
